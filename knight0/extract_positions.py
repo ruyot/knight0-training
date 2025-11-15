@@ -266,29 +266,66 @@ class PositionExtractor:
         max_games_per_file: Optional[int] = None
     ):
         """
-        Process multiple PGN files and save all positions to a single output file.
+        Process multiple PGN files with incremental saving (resumable).
+        
+        Each PGN is saved as a separate shard. If a shard exists, skip that PGN.
+        At the end, merge all shards into the final output file.
         
         Args:
             pgn_paths: List of PGN file paths
-            output_path: Path to save pickle file
+            output_path: Path to save final merged pickle file
             max_games_per_file: Optional limit on games per file
         """
-        logger.info(f"Processing {len(pgn_paths)} PGN files")
+        logger.info(f"Processing {len(pgn_paths)} PGN files with incremental saving")
         
-        all_positions = []
+        # Create processed/ directory for shards
+        shards_dir = output_path.parent / "processed"
+        shards_dir.mkdir(exist_ok=True)
+        logger.info(f"Shards directory: {shards_dir}")
+        
+        # Process each PGN (or skip if shard exists)
+        processed_shards = []
         
         for pgn_path in tqdm(pgn_paths, desc="Processing PGN files"):
+            # Generate shard name from PGN filename
+            shard_name = f"shard_{pgn_path.stem}.pkl"
+            shard_path = shards_dir / shard_name
+            
+            if shard_path.exists():
+                logger.info(f"✓ Shard exists for {pgn_path.name}, skipping extraction")
+                processed_shards.append(shard_path)
+                continue
+            
+            # Extract positions for this PGN
+            logger.info(f"Processing {pgn_path.name}...")
             positions = self.process_pgn_file(pgn_path, max_games_per_file)
-            all_positions.extend(positions)
+            
+            # Save shard immediately
+            logger.info(f"Saving shard to {shard_path} ({len(positions)} positions)")
+            with open(shard_path, 'wb') as f:
+                pickle.dump(positions, f)
+            
+            processed_shards.append(shard_path)
+            logger.info(f"✓ Saved shard for {pgn_path.name}")
         
-        logger.info(f"Total positions extracted: {len(all_positions)}")
+        # Merge all shards into final output
+        logger.info(f"\nMerging {len(processed_shards)} shards into {output_path}")
+        all_positions = []
         
-        # Save to disk
-        logger.info(f"Saving positions to {output_path}")
+        for shard_path in processed_shards:
+            with open(shard_path, 'rb') as f:
+                shard_positions = pickle.load(f)
+                all_positions.extend(shard_positions)
+                logger.info(f"  Loaded {len(shard_positions)} positions from {shard_path.name}")
+        
+        logger.info(f"Total positions: {len(all_positions)}")
+        
+        # Save merged dataset
+        logger.info(f"Saving merged dataset to {output_path}")
         with open(output_path, 'wb') as f:
             pickle.dump(all_positions, f)
         
-        logger.info(f"Saved {len(all_positions)} positions to {output_path}")
+        logger.info(f"✓ Saved {len(all_positions)} positions to {output_path}")
 
 
 def create_training_data(
@@ -349,6 +386,52 @@ def create_training_data(
         )
     
     return output_path
+
+
+def extract_single_pgn_shard(
+    pgn_path: Path,
+    output_dir: Path,
+    stockfish_path: str = "/usr/games/stockfish",
+    max_games: Optional[int] = None
+) -> Path:
+    """
+    Extract positions from a single PGN file and save as a shard.
+    Designed for parallel execution across multiple workers.
+    
+    Args:
+        pgn_path: Path to the PGN file
+        output_dir: Directory to save the shard
+        stockfish_path: Path to Stockfish binary
+        max_games: Optional limit on games to process
+    
+    Returns:
+        Path to the saved shard file
+    """
+    logger.info(f"Worker processing: {pgn_path.name}")
+    
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate shard name
+    shard_name = f"shard_{pgn_path.stem}.pkl"
+    shard_path = output_dir / shard_name
+    
+    # Check if already processed
+    if shard_path.exists():
+        logger.info(f"✓ Shard exists for {pgn_path.name}, skipping")
+        return shard_path
+    
+    # Extract positions
+    with PositionExtractor(stockfish_path=stockfish_path) as extractor:
+        positions = extractor.process_pgn_file(pgn_path, max_games)
+    
+    # Save shard
+    logger.info(f"Saving shard to {shard_path} ({len(positions)} positions)")
+    with open(shard_path, 'wb') as f:
+        pickle.dump(positions, f)
+    
+    logger.info(f"✓ Completed {pgn_path.name}: {len(positions)} positions")
+    return shard_path
 
 
 if __name__ == "__main__":

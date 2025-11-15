@@ -59,11 +59,11 @@ class ChessTrainer:
         self.policy_criterion = nn.CrossEntropyLoss()
         self.value_criterion = nn.MSELoss()
         
-        # Optimizer
+        # Optimizer with STRONGER weight decay to prevent overfitting
         self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
-            weight_decay=1e-4
+            weight_decay=1e-3  # 10x stronger L2 regularization
         )
         
         # Learning rate scheduler
@@ -78,6 +78,12 @@ class ChessTrainer:
         self.best_val_loss = float('inf')
         self.train_losses = []
         self.val_losses = []
+        
+        # Early stopping
+        self.patience = 5  # Stop if no improvement for 10 epochs
+        self.min_delta = 0.001  # Minimum improvement to count
+        self.epochs_no_improve = 0
+        self.best_model_path = None
     
     def train_epoch(self) -> dict:
         """
@@ -239,12 +245,21 @@ class ChessTrainer:
             if epoch % checkpoint_every == 0:
                 self.save_checkpoint(checkpoint_dir / f"checkpoint_epoch_{epoch}.pth")
             
-            # Save best model
+            # Save best model + early stopping
             current_val_loss = val_metrics.get("val_loss", train_metrics["loss"])
-            if current_val_loss < self.best_val_loss:
+            if current_val_loss < self.best_val_loss - self.min_delta:
                 self.best_val_loss = current_val_loss
                 self.save_checkpoint(checkpoint_dir / "best_model.pth")
+                self.epochs_no_improve = 0
                 logger.info(f"  ✓ Saved best model (val_loss: {current_val_loss:.4f})")
+            else:
+                self.epochs_no_improve += 1
+                logger.info(f"  No improvement for {self.epochs_no_improve}/{self.patience} epochs")
+                
+                if self.epochs_no_improve >= self.patience:
+                    logger.info(f"\n⚠ Early stopping triggered! No improvement for {self.patience} epochs")
+                    logger.info(f"Best validation loss: {self.best_val_loss:.4f}")
+                    break
         
         total_time = time.time() - start_time
         logger.info(f"\nTraining completed in {format_time(total_time)}")
@@ -366,11 +381,14 @@ def train_main(
             
             if found_pgns:
                 logger.info(f"Found {len(found_pgns)} PGN file(s): {[p.name for p in found_pgns]}")
+                # OPTION A: Process ALL games at depth 10 for maximum coverage
+                # Incremental sharding ensures no progress is lost
+                # Target: ~450k games → ~5.4M positions
                 data_path = create_training_data(
                     root_dir=root_dir,
-                    pgn_paths=found_pgns,  # Use all found PGNs
+                    pgn_paths=found_pgns,  # Use ALL PGNs
                     use_test_data=False,
-                    max_games_per_file=5000,  # Limit for 30-min run with depth 15
+                    max_games_per_file=None,  # Process ALL games in each file
                 )
             else:
                 logger.warning("No PGN files found. Using test data instead.")
@@ -436,9 +454,20 @@ def train_main(
         checkpoint_dir=checkpoint_dir
     )
     
-    # Step 6: Export to ONNX
+    # Step 6: Export to ONNX (use BEST model, not final)
     if export_onnx_after:
-        logger.info("\nExporting model to ONNX...")
+        logger.info("\nExporting BEST model to ONNX...")
+        
+        # Load best checkpoint
+        best_checkpoint = checkpoint_dir / "best_model.pth"
+        if best_checkpoint.exists():
+            logger.info(f"Loading best model from {best_checkpoint}")
+            checkpoint = torch.load(best_checkpoint, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            logger.info(f"  Best model: epoch {checkpoint['epoch']}, val_loss {checkpoint.get('best_val_loss', 'N/A'):.4f}")
+        else:
+            logger.warning("Best model checkpoint not found, using final model")
+        
         onnx_path = root_path / "knight0_model.onnx"
         export_to_onnx(model, str(onnx_path))
         logger.info(f"ONNX model saved to {onnx_path}")

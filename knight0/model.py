@@ -19,12 +19,14 @@ from .config import CONFIGS
 class ResidualBlock(nn.Module):
     """
     A single residual block with two conv layers and a skip connection.
+    Includes dropout for regularization to prevent overfitting.
     """
     
-    def __init__(self, filters: int):
+    def __init__(self, filters: int, dropout: float = 0.1):
         super().__init__()
         self.conv1 = nn.Conv2d(filters, filters, kernel_size=3, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(filters)
+        self.dropout = nn.Dropout2d(dropout)
         self.conv2 = nn.Conv2d(filters, filters, kernel_size=3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(filters)
     
@@ -33,6 +35,7 @@ class ResidualBlock(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = F.relu(out)
+        out = self.dropout(out)  # Dropout after activation
         out = self.conv2(out)
         out = self.bn2(out)
         out += residual
@@ -57,6 +60,7 @@ class ChessNet(nn.Module):
         filters: int = 128,
         num_blocks: int = 10,
         n_moves: int = 4096,
+        dropout: float = 0.15,  # Dropout rate (0.15 = 15%)
     ):
         super().__init__()
         self.input_channels = input_channels
@@ -70,20 +74,23 @@ class ChessNet(nn.Module):
         )
         self.bn_init = nn.BatchNorm2d(filters)
         
-        # Residual tower
+        # Residual tower with dropout
         self.residual_blocks = nn.ModuleList([
-            ResidualBlock(filters) for _ in range(num_blocks)
+            ResidualBlock(filters, dropout=dropout) for _ in range(num_blocks)
         ])
         
-        # Policy head
+        # Policy head with dropout
         self.policy_conv = nn.Conv2d(filters, 32, kernel_size=1, bias=False)
         self.policy_bn = nn.BatchNorm2d(32)
+        self.policy_dropout = nn.Dropout(dropout * 1.5)  # Higher dropout in policy head
         self.policy_fc = nn.Linear(32 * 8 * 8, n_moves)
         
-        # Value head
+        # Value head with dropout
         self.value_conv = nn.Conv2d(filters, 32, kernel_size=1, bias=False)
         self.value_bn = nn.BatchNorm2d(32)
+        self.value_dropout1 = nn.Dropout(dropout * 1.5)
         self.value_fc1 = nn.Linear(32 * 8 * 8, 256)
+        self.value_dropout2 = nn.Dropout(dropout * 1.5)
         self.value_fc2 = nn.Linear(256, 1)
     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -107,20 +114,23 @@ class ChessNet(nn.Module):
         for block in self.residual_blocks:
             x = block(x)
         
-        # Policy head
+        # Policy head with dropout
         policy = self.policy_conv(x)
         policy = self.policy_bn(policy)
         policy = F.relu(policy)
         policy = policy.view(policy.size(0), -1)  # Flatten
+        policy = self.policy_dropout(policy)
         policy = self.policy_fc(policy)
         
-        # Value head
+        # Value head with dropout
         value = self.value_conv(x)
         value = self.value_bn(value)
         value = F.relu(value)
         value = value.view(value.size(0), -1)  # Flatten
+        value = self.value_dropout1(value)
         value = self.value_fc1(value)
         value = F.relu(value)
+        value = self.value_dropout2(value)
         value = self.value_fc2(value)
         value = torch.tanh(value)
         

@@ -31,19 +31,22 @@ CONFIGS = {
 }
 
 # Training hyperparameters (defaults)
+# Optimized for ~5M position training run (Option A)
 TRAINING_CONFIG = {
-    "batch_size": 256,
-    "learning_rate": 1e-3,
-    "num_epochs": 50,
+    "batch_size": 512,  # Larger batch for better gradient estimates with more data
+    "learning_rate": 5e-4,  # Conservative LR
+    "num_epochs": 100,  # Early stopping will kick in when needed
     "value_loss_weight": 0.5,  # alpha in total_loss = policy_loss + alpha * value_loss
     "checkpoint_every": 5,  # Save checkpoint every N epochs
     "gradient_clip": 1.0,
+    "weight_decay": 1e-3,  # L2 regularization (CRITICAL for preventing overfit)
+    "dropout": 0.15,  # Dropout rate for model
 }
 
 # Stockfish labeling config
 STOCKFISH_CONFIG = {
-    "depth": 15,  # Deeper analysis for better quality labels
-    "time_limit": 0.1,  # seconds
+    "depth": 10,  # Broad pass - faster, more coverage
+    "time_limit": 0.05,  # seconds
     "sample_rate": 4,  # Label every 4th move (more positions)
     "min_move": 10,  # Start labeling from move 10
     "max_move": 60,  # Stop labeling after move 60
