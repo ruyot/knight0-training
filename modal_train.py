@@ -27,10 +27,12 @@ image = (
         "datasets>=2.14.0",
         "onnx>=1.14.0",
         "onnxruntime>=1.15.0",
+        "onnxscript>=0.1.0",  # Required for PyTorch 2.x ONNX export
         "requests>=2.31.0",
     )
     .apt_install("stockfish")
     .add_local_dir("knight0", remote_path="/root/knight0_pkg/knight0")
+    .add_local_file("lichess_elite_2023-12.pgn", remote_path="/root/knight0_pkg/lichess_elite_2023-12.pgn")
 )
 
 # Create a persistent volume for storing data, checkpoints, and models
@@ -96,14 +98,13 @@ def train_on_modal(
     image=image,
     volumes={VOLUME_PATH: volume},
 )
-def download_onnx_model(output_path: str = "knight0_model.onnx"):
+def download_onnx_model():
     """
-    Download the trained ONNX model from the volume to local filesystem.
+    Download the trained ONNX model from the volume.
     
-    Args:
-        output_path: Local path to save the ONNX model
+    Returns:
+        bytes: The ONNX model file contents
     """
-    import shutil
     from pathlib import Path
     
     source_path = Path(VOLUME_PATH) / "knight0_model.onnx"
@@ -111,18 +112,14 @@ def download_onnx_model(output_path: str = "knight0_model.onnx"):
     if not source_path.exists():
         print(f"Error: ONNX model not found at {source_path}")
         print("Please run training first.")
-        return
+        return None
     
     # Read the file from the volume
     with open(source_path, 'rb') as f:
         model_data = f.read()
     
-    # Write to local file (this will be returned by Modal)
-    with open(output_path, 'wb') as f:
-        f.write(model_data)
-    
-    print(f"Downloaded ONNX model to {output_path}")
-    print(f"Model size: {len(model_data) / 1e6:.2f} MB")
+    print(f"Read ONNX model from volume ({len(model_data) / 1e6:.2f} MB)")
+    return model_data
 
 
 @app.function(
@@ -215,7 +212,12 @@ def main(
     
     elif action == "download":
         print("Downloading ONNX model from Modal volume...")
-        download_onnx_model.remote()
+        model_data = download_onnx_model.remote()
+        if model_data:
+            output_path = "knight0_model.onnx"
+            with open(output_path, 'wb') as f:
+                f.write(model_data)
+            print(f"✓ Saved ONNX model to {output_path} ({len(model_data) / 1e6:.2f} MB)")
     
     elif action == "list":
         print("Listing Modal volume contents...")

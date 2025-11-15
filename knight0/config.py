@@ -42,11 +42,11 @@ TRAINING_CONFIG = {
 
 # Stockfish labeling config
 STOCKFISH_CONFIG = {
-    "depth": 15,
-    "time_limit": 0.1,  # seconds
-    "sample_rate": 5,  # Label every Nth move
+    "depth": 10,  # Shallower for faster processing
+    "time_limit": 0.05,  # seconds
+    "sample_rate": 8,  # Label every 8th move (fewer positions)
     "min_move": 10,  # Start labeling from move 10
-    "max_move": 60,  # Stop labeling after move 60
+    "max_move": 50,  # Stop labeling after move 50
 }
 
 # Data filtering

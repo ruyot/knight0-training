@@ -342,11 +342,45 @@ def train_main(
     
     if not data_path.exists():
         logger.info("\nTraining data not found. Creating...")
-        data_path = create_training_data(
-            root_dir=root_dir,
-            use_test_data=use_test_data,
-            max_games_per_file=100 if use_test_data else None
-        )
+        
+        if use_test_data:
+            # Use built-in test data
+            data_path = create_training_data(
+                root_dir=root_dir,
+                use_test_data=True,
+                max_games_per_file=100
+            )
+        else:
+            # Look for real PGN files in the mounted knight0 directory
+            # The repo is mounted at /root/knight0_pkg, so PGNs at repo root are there
+            pgn_search_paths = [
+                Path("/root/knight0_pkg/lichess_elite_2023-12.pgn"),
+                Path("/root/knight0_pkg/*.pgn"),
+            ]
+            
+            found_pgns = []
+            for search_path in pgn_search_paths:
+                if '*' in str(search_path):
+                    # Glob pattern
+                    found_pgns.extend(search_path.parent.glob(search_path.name))
+                elif search_path.exists():
+                    found_pgns.append(search_path)
+            
+            if found_pgns:
+                logger.info(f"Found {len(found_pgns)} PGN file(s): {[p.name for p in found_pgns]}")
+                data_path = create_training_data(
+                    root_dir=root_dir,
+                    pgn_paths=found_pgns[:1],  # Use first PGN only for now
+                    use_test_data=False,
+                    max_games_per_file=1000,  # Process max 1000 games
+                )
+            else:
+                logger.warning("No PGN files found. Using test data instead.")
+                data_path = create_training_data(
+                    root_dir=root_dir,
+                    use_test_data=True,
+                    max_games_per_file=100
+                )
     else:
         logger.info(f"\nUsing existing training data: {data_path}")
     
