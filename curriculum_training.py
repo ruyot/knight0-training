@@ -156,7 +156,7 @@ class CurriculumTrainer:
         self,
         knight0_white: bool = True,
         max_moves: int = 200,
-        time_per_move: float = 1.0
+        time_per_move: float = 0.1  # 0.1s = bullet speed!
     ) -> GameResult:
         """
         Play one game: knight0 vs Stockfish.
@@ -223,7 +223,7 @@ class CurriculumTrainer:
     def run_tournament(
         self,
         skill_level: int,
-        num_games: int = 50,
+        num_games: int = 100,  # More games at bullet speed!
         alternate_colors: bool = True
     ) -> TournamentResult:
         """
