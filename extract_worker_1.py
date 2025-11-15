@@ -9,7 +9,7 @@ app = modal.App("knight0-extract-worker-1")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("python-chess>=1.999", "numpy>=1.24.0", "tqdm>=4.65.0")
-    .apt_install("stockfish")
+    .apt_install("lc0")  # Leela Chess Zero - MUCH FASTER than Stockfish!
     .add_local_dir("knight0", remote_path="/root/knight0_pkg/knight0")
     .add_local_dir("data", remote_path="/root/knight0_pkg/data")
 )
@@ -26,11 +26,17 @@ VOLUME_PATH = "/root/knight0"
 )
 def extract_pgns_batch_1():
     """Extract positions from PGNs 1-5"""
+    print("\n" + "="*80, flush=True)
+    print("🚀 WORKER 1 FUNCTION STARTED!", flush=True)
+    print("="*80 + "\n", flush=True)
+    
     import sys
     sys.path.insert(0, "/root/knight0_pkg")
     
+    print("✓ Python path configured", flush=True)
+    
     from pathlib import Path
-    from knight0.extract_positions import extract_single_pgn_shard
+    from knight0.lc0_labeler import extract_single_pgn_shard_lc0
     
     data_dir = Path("/root/knight0_pkg/data")
     output_dir = Path(VOLUME_PATH) / "processed"
@@ -40,20 +46,20 @@ def extract_pgns_batch_1():
     all_pgns = sorted([f for f in data_dir.glob("*.pgn")])
     my_pgns = all_pgns[0:5]
     
-    print(f"Worker 1 processing {len(my_pgns)} PGNs:")
+    print(f"Worker 1 processing {len(my_pgns)} PGNs with LC0 (FAST!):")
     for pgn in my_pgns:
         print(f"  - {pgn.name}")
     
     results = []
     for pgn_path in my_pgns:
         print(f"\n{'='*80}")
-        print(f"Processing: {pgn_path.name}")
+        print(f"Processing with LC0: {pgn_path.name}")
         print('='*80)
         
-        shard_path = extract_single_pgn_shard(
+        shard_path = extract_single_pgn_shard_lc0(
             pgn_path=pgn_path,
             output_dir=output_dir,
-            stockfish_path="/usr/games/stockfish",
+            lc0_binary="lc0",
             max_games=None
         )
         

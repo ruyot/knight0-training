@@ -43,18 +43,26 @@ TRAINING_CONFIG = {
     "dropout": 0.15,  # Dropout rate for model
 }
 
-# Stockfish labeling config
+# Stockfish labeling config (SLOW - not recommended)
 STOCKFISH_CONFIG = {
-    "depth": 10,  # Broad pass - faster, more coverage
-    "time_limit": 0.05,  # seconds
-    "sample_rate": 4,  # Label every 4th move (more positions)
-    "min_move": 10,  # Start labeling from move 10
-    "max_move": 60,  # Stop labeling after move 60
+    "depth": 5,
+    "time_limit": 0.01,
+    "sample_rate": 8,
+    "min_move": 15,
+    "max_move": 50,
+}
+
+# LC0 (Leela Chess Zero) config - MUCH FASTER! (10-100x)
+LC0_CONFIG = {
+    "visits": 50,  # Number of NN evaluations (very fast with GPU!)
+    "sample_rate": 8,  # Label every 8th move
+    "min_move": 15,  # Start from move 15
+    "max_move": 50,  # End at move 50
 }
 
 # Data filtering
 DATA_FILTERS = {
-    "min_elo": 2200,  # Minimum Elo for games
+    "min_elo": 0,  # No Elo filtering - datasets are already high quality!
     "min_moves": 20,  # Minimum number of moves in a game
     "max_moves": 200,  # Maximum number of moves in a game
 }

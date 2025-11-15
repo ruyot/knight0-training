@@ -14,6 +14,7 @@ import chess.engine
 import pickle
 import gzip
 import bz2
+import signal
 from pathlib import Path
 from typing import List, Dict, Optional, Iterator
 from tqdm import tqdm
@@ -23,6 +24,16 @@ from .config import STOCKFISH_CONFIG, DATA_FILTERS
 from .utils import normalize_score
 
 logger = logging.getLogger(__name__)
+
+
+class TimeoutError(Exception):
+    """Raised when a timeout occurs"""
+    pass
+
+
+def timeout_handler(signum, frame):
+    """Signal handler for timeout"""
+    raise TimeoutError("Operation timed out")
 
 
 class PositionExtractor:
@@ -58,8 +69,11 @@ class PositionExtractor:
     
     def __enter__(self):
         """Context manager entry: open Stockfish engine."""
+        print(f"DEBUG: __enter__ called, starting Stockfish at {self.stockfish_path}...", flush=True)
         logger.info(f"Starting Stockfish engine: {self.stockfish_path}")
+        print("DEBUG: About to call popen_uci...", flush=True)
         self.engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
+        print("DEBUG: Stockfish started successfully!", flush=True)
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -220,42 +234,98 @@ class PositionExtractor:
         Returns:
             List of labeled positions
         """
+        print(f"DEBUG: process_pgn_file called for {pgn_path}", flush=True)
         logger.info(f"Processing PGN file: {pgn_path}")
+        print(f"DEBUG: Logger done, opening PGN file...", flush=True)
         
         all_positions = []
         games_processed = 0
         games_skipped = 0
         
+        print(f"DEBUG: About to call open_pgn_file...", flush=True)
         with self.open_pgn_file(pgn_path) as pgn_file:
+            print(f"DEBUG: PGN file opened, entering game loop...", flush=True)
             while True:
                 if max_games and games_processed >= max_games:
                     break
                 
                 try:
-                    game = chess.pgn.read_game(pgn_file)
+                    if games_processed == 1:
+                        print(f"DEBUG: Top of loop, about to read game 2...", flush=True)
+                    if games_processed == 0:
+                        print(f"DEBUG: Reading first game...", flush=True)
+                    
+                    # Try to read game with 10-second timeout
+                    game = None
+                    try:
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(10)  # 10-second timeout
+                        game = chess.pgn.read_game(pgn_file)
+                        signal.alarm(0)  # Cancel alarm
+                    except TimeoutError:
+                        signal.alarm(0)  # Cancel alarm
+                        logger.warning(f"Timeout reading game after {games_processed} games - skipping")
+                        print(f"DEBUG: Timeout on game read, skipping...", flush=True)
+                        # Try to recover by reading rest of game
+                        continue
+                    except Exception as parse_error:
+                        signal.alarm(0)  # Cancel alarm
+                        logger.warning(f"Error parsing game (skipping): {parse_error}")
+                        print(f"DEBUG: Parse error, continuing...", flush=True)
+                        continue
+                    
+                    if games_processed == 0:
+                        print(f"DEBUG: First game read: {game is not None}", flush=True)
+                    if games_processed == 1:
+                        print(f"DEBUG: Second game read: {game is not None}", flush=True)
                     if game is None:
                         break
                     
+                    if games_processed == 1:
+                        print(f"DEBUG: Checking if second game should be processed...", flush=True)
                     if not self.should_process_game(game):
                         games_skipped += 1
+                        if games_processed == 0 and games_skipped < 5:
+                            print(f"DEBUG: Game {games_skipped} skipped (filters)", flush=True)
+                        if games_processed == 1:
+                            print(f"DEBUG: Second game skipped by filters", flush=True)
                         continue
                     
+                    if games_processed == 0:
+                        print(f"DEBUG: Extracting from first game...", flush=True)
+                    if games_processed == 1:
+                        print(f"DEBUG: Extracting from second game...", flush=True)
                     positions = self.extract_from_game(game)
+                    if games_processed == 1:
+                        print(f"DEBUG: Extracted {len(positions)} from second game", flush=True)
+                    if games_processed == 0:
+                        print(f"DEBUG: Extracted {len(positions)} positions from first game", flush=True)
                     all_positions.extend(positions)
                     games_processed += 1
+                    if games_processed == 1:
+                        print(f"DEBUG: First game COMPLETE! Total positions so far: {len(all_positions)}", flush=True)
+                        print(f"DEBUG: Looping back to read game 2...", flush=True)
                     
-                    if games_processed % 100 == 0:
-                        logger.info(f"  Processed {games_processed} games, "
-                                  f"extracted {len(all_positions)} positions")
+                    # More frequent logging!
+                    if games_processed % 50 == 0:
+                        avg_per_game = len(all_positions) / games_processed if games_processed > 0 else 0
+                        logger.info(f"  ✓ Processed {games_processed} games, "
+                                  f"extracted {len(all_positions)} positions "
+                                  f"(avg: {avg_per_game:.1f} pos/game)")
                 
                 except Exception as e:
                     logger.warning(f"Error processing game: {e}")
                     continue
         
-        logger.info(f"Finished processing {pgn_path}")
-        logger.info(f"  Games processed: {games_processed}")
-        logger.info(f"  Games skipped: {games_skipped}")
-        logger.info(f"  Positions extracted: {len(all_positions)}")
+        avg_per_game = len(all_positions) / games_processed if games_processed > 0 else 0
+        logger.info(f"")
+        logger.info(f"{'='*80}")
+        logger.info(f"✓ PGN COMPLETE: {pgn_path.name}")
+        logger.info(f"  Games processed: {games_processed:,}")
+        logger.info(f"  Games skipped:   {games_skipped:,}")
+        logger.info(f"  Positions:       {len(all_positions):,}")
+        logger.info(f"  Avg pos/game:    {avg_per_game:.1f}")
+        logger.info(f"{'='*80}")
         
         return all_positions
     
@@ -406,22 +476,38 @@ def extract_single_pgn_shard(
     Returns:
         Path to the saved shard file
     """
+    import sys
+    print(f"\n{'='*80}", flush=True)
+    print(f"EXTRACT_SINGLE_PGN_SHARD CALLED", flush=True)
+    print(f"PGN: {pgn_path}", flush=True)
+    print(f"Output dir: {output_dir}", flush=True)
+    print(f"{'='*80}\n", flush=True)
+    sys.stdout.flush()
+    
+    print("DEBUG: About to call logger.info...", flush=True)
     logger.info(f"Worker processing: {pgn_path.name}")
+    print("DEBUG: Logger.info done", flush=True)
     
     # Create output directory
+    print("DEBUG: Creating output directory...", flush=True)
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"DEBUG: Output dir created: {output_dir}", flush=True)
     
     # Generate shard name
     shard_name = f"shard_{pgn_path.stem}.pkl"
     shard_path = output_dir / shard_name
+    print(f"DEBUG: Shard path: {shard_path}", flush=True)
     
     # Check if already processed
     if shard_path.exists():
+        print(f"DEBUG: Shard exists, skipping", flush=True)
         logger.info(f"✓ Shard exists for {pgn_path.name}, skipping")
         return shard_path
     
+    print(f"DEBUG: Creating PositionExtractor with stockfish={stockfish_path}...", flush=True)
     # Extract positions
     with PositionExtractor(stockfish_path=stockfish_path) as extractor:
+        print("DEBUG: PositionExtractor created, calling process_pgn_file...", flush=True)
         positions = extractor.process_pgn_file(pgn_path, max_games)
     
     # Save shard
