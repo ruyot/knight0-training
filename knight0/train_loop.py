@@ -370,9 +370,9 @@ def train_main(
                 logger.info(f"Found {len(found_pgns)} PGN file(s): {[p.name for p in found_pgns]}")
                 data_path = create_training_data(
                     root_dir=root_dir,
-                    pgn_paths=found_pgns[:1],  # Use first PGN only for now
+                    pgn_paths=found_pgns,  # Use ALL PGNs found
                     use_test_data=False,
-                    max_games_per_file=1000,  # Process max 1000 games
+                    max_games_per_file=None,  # No limit - process all games in each file
                 )
             else:
                 logger.warning("No PGN files found. Using test data instead.")
