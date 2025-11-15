@@ -20,7 +20,7 @@ def export_to_onnx(
     model: ChessNet,
     output_path: str,
     input_channels: int = 21,
-    opset_version: int = 14,
+    opset_version: int = 17,  # Use newer opset for better compatibility
     verify: bool = True
 ) -> Path:
     """
@@ -51,14 +51,15 @@ def export_to_onnx(
     device = next(model.parameters()).device
     dummy_input = dummy_input.to(device)
     
-    # Export to ONNX
+    # Export to ONNX with weights embedded (no external data files)
+    # For models < 2GB, embedding weights in the .onnx file is cleaner for deployment
     torch.onnx.export(
         model,
         dummy_input,
-        output_path,
-        export_params=True,
+        str(output_path),  # Ensure it's a string
+        export_params=True,  # Include weights in the model
         opset_version=opset_version,
-        do_constant_folding=True,
+        do_constant_folding=True,  # Optimize constants
         input_names=["input"],
         output_names=["policy", "value"],
         dynamic_axes={
@@ -67,6 +68,20 @@ def export_to_onnx(
             "value": {0: "batch_size"}
         }
     )
+    
+    # Verify no external data files were created
+    data_file = Path(str(output_path) + ".data")
+    if data_file.exists():
+        logger.warning(f"External data file created: {data_file}")
+        logger.info("Loading and re-saving model to embed weights...")
+        import onnx
+        # Load the model
+        onnx_model = onnx.load(str(output_path))
+        # Save it back with embedded weights
+        onnx.save(onnx_model, str(output_path))
+        # Remove the external data file
+        data_file.unlink()
+        logger.info("Weights now embedded in single file")
     
     logger.info(f"Successfully exported ONNX model to {output_path}")
     
