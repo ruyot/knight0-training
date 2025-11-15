@@ -30,7 +30,7 @@ image = (
         "requests>=2.31.0",
     )
     .apt_install("stockfish")
-    .copy_local_dir("knight0", "/root/knight0_pkg/knight0")
+    .add_local_dir("knight0", remote_path="/root/knight0_pkg/knight0")
 )
 
 # Create a persistent volume for storing data, checkpoints, and models

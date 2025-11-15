@@ -295,7 +295,7 @@ def create_training_data(
     root_dir: str,
     pgn_paths: Optional[List[Path]] = None,
     output_filename: str = "training_data.pkl",
-    stockfish_path: str = "stockfish",
+    stockfish_path: str = "/usr/games/stockfish",  # Default Debian path
     max_games_per_file: Optional[int] = None,
     use_test_data: bool = False,
 ) -> Path:

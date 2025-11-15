@@ -88,6 +88,48 @@ sudo apt-get install stockfish
 # Or download from https://stockfishchess.org/download/
 ```
 
+## Quick Start - Testing Before Training
+
+### Dry Test #1: Local CPU Test (No Modal, No Stockfish)
+
+Test all components with dummy data on your local machine:
+
+```bash
+# Run the local dry test
+python3 test_local.py
+```
+
+This will verify:
+- ✅ ChessDataset loads dummy positions
+- ✅ ChessNet forward pass works
+- ✅ Loss computation works
+- ✅ Optimizer step works
+- ✅ Encoding functions work
+- ✅ Mini training loop runs
+
+**Expected output**: All tests pass with green checkmarks.
+
+### Dry Test #2: Modal Smoke Test
+
+Test that Modal infrastructure is set up correctly:
+
+```bash
+# Run the Modal smoke test
+modal run test_modal_smoke.py
+```
+
+This will verify:
+- ✅ Modal image builds successfully
+- ✅ GPU allocation works
+- ✅ Volume mounts and is writable
+- ✅ knight0 package imports correctly
+- ✅ All dependencies are available
+- ✅ Stockfish is accessible
+
+**Expected output**: Remote logs show "SMOKE TEST PASSED!" with green checkmarks.
+
+---
+
 ## Usage
 
 ### Quick Start - Training on Modal
@@ -193,7 +235,31 @@ Three pre-configured model sizes:
 | medium | 128     | 10     | ~2M        | Balanced performance |
 | large  | 256     | 20     | ~10M       | Maximum strength |
 
-## Local Testing (Without Modal)
+## Testing & Debugging
+
+### Recommended Testing Flow
+
+1. **First**: Run local dry test to verify components work
+   ```bash
+   python test_local.py
+   ```
+
+2. **Second**: Run Modal smoke test to verify infrastructure
+   ```bash
+   modal run test_modal_smoke.py
+   ```
+
+3. **Third**: Run quick training test with dummy data
+   ```bash
+   modal run modal_train.py --test true --epochs 2
+   ```
+
+4. **Finally**: Run full training with real data
+   ```bash
+   modal run modal_train.py --config medium --epochs 50
+   ```
+
+### Individual Component Testing
 
 You can test components locally:
 
