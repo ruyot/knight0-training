@@ -32,7 +32,7 @@ image = (
     )
     .apt_install("stockfish")
     .add_local_dir("knight0", remote_path="/root/knight0_pkg/knight0")
-    .add_local_file("lichess_elite_2023-12.pgn", remote_path="/root/knight0_pkg/lichess_elite_2023-12.pgn")
+    .add_local_dir("data", remote_path="/root/knight0_pkg/data")
 )
 
 # Create a persistent volume for storing data, checkpoints, and models

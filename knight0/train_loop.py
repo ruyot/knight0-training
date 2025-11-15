@@ -351,28 +351,26 @@ def train_main(
                 max_games_per_file=100
             )
         else:
-            # Look for real PGN files in the mounted knight0 directory
-            # The repo is mounted at /root/knight0_pkg, so PGNs at repo root are there
+            # Look for real PGN files in the mounted data directory
+            # The repo is mounted at /root/knight0_pkg, data/ folder is there
             pgn_search_paths = [
-                Path("/root/knight0_pkg/lichess_elite_2023-12.pgn"),
-                Path("/root/knight0_pkg/*.pgn"),
+                Path("/root/knight0_pkg/data"),  # Look in data/ folder
             ]
             
             found_pgns = []
-            for search_path in pgn_search_paths:
-                if '*' in str(search_path):
-                    # Glob pattern
-                    found_pgns.extend(search_path.parent.glob(search_path.name))
-                elif search_path.exists():
-                    found_pgns.append(search_path)
+            for search_dir in pgn_search_paths:
+                if search_dir.exists() and search_dir.is_dir():
+                    # Find all .pgn files in this directory
+                    found_pgns.extend(search_dir.glob("*.pgn"))
+                    logger.info(f"Searching for PGNs in {search_dir}...")
             
             if found_pgns:
                 logger.info(f"Found {len(found_pgns)} PGN file(s): {[p.name for p in found_pgns]}")
                 data_path = create_training_data(
                     root_dir=root_dir,
-                    pgn_paths=found_pgns,  # Use ALL PGNs found
+                    pgn_paths=found_pgns,  # Use all found PGNs
                     use_test_data=False,
-                    max_games_per_file=None,  # No limit - process all games in each file
+                    max_games_per_file=5000,  # Limit for 30-min run with depth 15
                 )
             else:
                 logger.warning("No PGN files found. Using test data instead.")
