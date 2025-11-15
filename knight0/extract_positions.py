@@ -1,0 +1,389 @@
+"""
+Position extraction and Stockfish labeling.
+
+This module:
+1. Parses PGN files
+2. Extracts positions from games
+3. Labels positions using Stockfish analysis
+4. Saves labeled positions to disk
+"""
+
+import chess
+import chess.pgn
+import chess.engine
+import pickle
+import gzip
+import bz2
+from pathlib import Path
+from typing import List, Dict, Optional, Iterator
+from tqdm import tqdm
+import logging
+
+from .config import STOCKFISH_CONFIG, DATA_FILTERS
+from .utils import normalize_score
+
+logger = logging.getLogger(__name__)
+
+
+class PositionExtractor:
+    """
+    Extracts and labels positions from PGN files using Stockfish.
+    """
+    
+    def __init__(
+        self,
+        stockfish_path: str = "stockfish",
+        depth: int = STOCKFISH_CONFIG["depth"],
+        time_limit: float = STOCKFISH_CONFIG["time_limit"],
+        sample_rate: int = STOCKFISH_CONFIG["sample_rate"],
+        min_move: int = STOCKFISH_CONFIG["min_move"],
+        max_move: int = STOCKFISH_CONFIG["max_move"],
+    ):
+        """
+        Args:
+            stockfish_path: Path to Stockfish binary
+            depth: Analysis depth
+            time_limit: Time limit per analysis (seconds)
+            sample_rate: Label every Nth move
+            min_move: Start labeling from this move number
+            max_move: Stop labeling after this move number
+        """
+        self.stockfish_path = stockfish_path
+        self.depth = depth
+        self.time_limit = time_limit
+        self.sample_rate = sample_rate
+        self.min_move = min_move
+        self.max_move = max_move
+        self.engine = None
+    
+    def __enter__(self):
+        """Context manager entry: open Stockfish engine."""
+        logger.info(f"Starting Stockfish engine: {self.stockfish_path}")
+        self.engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit: close Stockfish engine."""
+        if self.engine:
+            self.engine.quit()
+            logger.info("Closed Stockfish engine")
+    
+    def open_pgn_file(self, pgn_path: Path):
+        """
+        Open a PGN file, handling compression automatically.
+        
+        Args:
+            pgn_path: Path to PGN file (may be .gz or .bz2)
+            
+        Returns:
+            File handle
+        """
+        if pgn_path.suffix == '.gz':
+            return gzip.open(pgn_path, 'rt', encoding='utf-8', errors='ignore')
+        elif pgn_path.suffix == '.bz2':
+            return bz2.open(pgn_path, 'rt', encoding='utf-8', errors='ignore')
+        else:
+            return open(pgn_path, 'r', encoding='utf-8', errors='ignore')
+    
+    def should_process_game(self, game: chess.pgn.Game) -> bool:
+        """
+        Check if a game meets quality criteria.
+        
+        Args:
+            game: chess.pgn.Game object
+            
+        Returns:
+            True if game should be processed
+        """
+        headers = game.headers
+        
+        # Check if game has result
+        result = headers.get("Result", "*")
+        if result == "*":
+            return False
+        
+        # Check minimum Elo if available
+        try:
+            white_elo = int(headers.get("WhiteElo", 0))
+            black_elo = int(headers.get("BlackElo", 0))
+            min_elo = DATA_FILTERS["min_elo"]
+            
+            if white_elo > 0 and black_elo > 0:
+                if white_elo < min_elo or black_elo < min_elo:
+                    return False
+        except ValueError:
+            pass  # Elo not available or invalid
+        
+        # Check game length
+        mainline = list(game.mainline_moves())
+        num_moves = len(mainline)
+        
+        if num_moves < DATA_FILTERS["min_moves"]:
+            return False
+        if num_moves > DATA_FILTERS["max_moves"]:
+            return False
+        
+        return True
+    
+    def analyze_position(self, board: chess.Board) -> Optional[Dict]:
+        """
+        Analyze a position with Stockfish.
+        
+        Args:
+            board: chess.Board object
+            
+        Returns:
+            Dict with 'move' (UCI string) and 'score' (centipawns), or None if analysis fails
+        """
+        if not self.engine:
+            raise RuntimeError("Engine not initialized. Use context manager.")
+        
+        try:
+            # Run analysis
+            limit = chess.engine.Limit(depth=self.depth, time=self.time_limit)
+            result = self.engine.analyse(board, limit)
+            
+            # Extract best move
+            if "pv" not in result or len(result["pv"]) == 0:
+                return None
+            
+            best_move = result["pv"][0]
+            
+            # Extract score
+            score = result.get("score")
+            if score is None:
+                return None
+            
+            # Convert score to centipawns (from white's perspective)
+            score_cp = score.white().score(mate_score=10000)
+            if score_cp is None:
+                return None
+            
+            return {
+                "move": best_move.uci(),
+                "score": score_cp
+            }
+        
+        except Exception as e:
+            logger.warning(f"Analysis failed: {e}")
+            return None
+    
+    def extract_from_game(self, game: chess.pgn.Game) -> List[Dict]:
+        """
+        Extract labeled positions from a single game.
+        
+        Args:
+            game: chess.pgn.Game object
+            
+        Returns:
+            List of dicts with 'fen', 'move', 'value'
+        """
+        positions = []
+        board = game.board()
+        
+        for move_num, move in enumerate(game.mainline_moves(), start=1):
+            # Check if we should sample this position
+            if move_num < self.min_move or move_num > self.max_move:
+                board.push(move)
+                continue
+            
+            if move_num % self.sample_rate != 0:
+                board.push(move)
+                continue
+            
+            # Analyze position
+            analysis = self.analyze_position(board)
+            
+            if analysis is not None:
+                positions.append({
+                    "fen": board.fen(),
+                    "move": analysis["move"],
+                    "value": normalize_score(analysis["score"])
+                })
+            
+            board.push(move)
+        
+        return positions
+    
+    def process_pgn_file(
+        self,
+        pgn_path: Path,
+        max_games: Optional[int] = None
+    ) -> List[Dict]:
+        """
+        Process a single PGN file and extract labeled positions.
+        
+        Args:
+            pgn_path: Path to PGN file
+            max_games: Optional limit on number of games to process
+            
+        Returns:
+            List of labeled positions
+        """
+        logger.info(f"Processing PGN file: {pgn_path}")
+        
+        all_positions = []
+        games_processed = 0
+        games_skipped = 0
+        
+        with self.open_pgn_file(pgn_path) as pgn_file:
+            while True:
+                if max_games and games_processed >= max_games:
+                    break
+                
+                try:
+                    game = chess.pgn.read_game(pgn_file)
+                    if game is None:
+                        break
+                    
+                    if not self.should_process_game(game):
+                        games_skipped += 1
+                        continue
+                    
+                    positions = self.extract_from_game(game)
+                    all_positions.extend(positions)
+                    games_processed += 1
+                    
+                    if games_processed % 100 == 0:
+                        logger.info(f"  Processed {games_processed} games, "
+                                  f"extracted {len(all_positions)} positions")
+                
+                except Exception as e:
+                    logger.warning(f"Error processing game: {e}")
+                    continue
+        
+        logger.info(f"Finished processing {pgn_path}")
+        logger.info(f"  Games processed: {games_processed}")
+        logger.info(f"  Games skipped: {games_skipped}")
+        logger.info(f"  Positions extracted: {len(all_positions)}")
+        
+        return all_positions
+    
+    def process_multiple_pgns(
+        self,
+        pgn_paths: List[Path],
+        output_path: Path,
+        max_games_per_file: Optional[int] = None
+    ):
+        """
+        Process multiple PGN files and save all positions to a single output file.
+        
+        Args:
+            pgn_paths: List of PGN file paths
+            output_path: Path to save pickle file
+            max_games_per_file: Optional limit on games per file
+        """
+        logger.info(f"Processing {len(pgn_paths)} PGN files")
+        
+        all_positions = []
+        
+        for pgn_path in tqdm(pgn_paths, desc="Processing PGN files"):
+            positions = self.process_pgn_file(pgn_path, max_games_per_file)
+            all_positions.extend(positions)
+        
+        logger.info(f"Total positions extracted: {len(all_positions)}")
+        
+        # Save to disk
+        logger.info(f"Saving positions to {output_path}")
+        with open(output_path, 'wb') as f:
+            pickle.dump(all_positions, f)
+        
+        logger.info(f"Saved {len(all_positions)} positions to {output_path}")
+
+
+def create_training_data(
+    root_dir: str,
+    pgn_paths: Optional[List[Path]] = None,
+    output_filename: str = "training_data.pkl",
+    stockfish_path: str = "stockfish",
+    max_games_per_file: Optional[int] = None,
+    use_test_data: bool = False,
+) -> Path:
+    """
+    High-level function to create training data from PGN files.
+    
+    Args:
+        root_dir: Root directory (e.g., /root/knight0)
+        pgn_paths: List of PGN files to process (if None, auto-discover)
+        output_filename: Name of output pickle file
+        stockfish_path: Path to Stockfish binary
+        max_games_per_file: Optional limit on games per file
+        use_test_data: If True, create small test dataset
+        
+    Returns:
+        Path to output pickle file
+    """
+    from .data_sources import DataSourceManager
+    
+    root_path = Path(root_dir)
+    output_path = root_path / output_filename
+    
+    # If output already exists, return it
+    if output_path.exists():
+        logger.info(f"Training data already exists: {output_path}")
+        return output_path
+    
+    # Get PGN files
+    if pgn_paths is None:
+        manager = DataSourceManager(root_dir)
+        
+        if use_test_data:
+            # Create and use test data
+            test_pgn = manager.setup_quick_test_data()
+            pgn_paths = [test_pgn]
+        else:
+            # Auto-discover PGN files
+            pgn_paths = manager.list_available_pgns()
+            
+            if len(pgn_paths) == 0:
+                logger.warning("No PGN files found. Creating test data.")
+                test_pgn = manager.setup_quick_test_data()
+                pgn_paths = [test_pgn]
+    
+    # Process PGN files with Stockfish
+    with PositionExtractor(stockfish_path=stockfish_path) as extractor:
+        extractor.process_multiple_pgns(
+            pgn_paths=pgn_paths,
+            output_path=output_path,
+            max_games_per_file=max_games_per_file
+        )
+    
+    return output_path
+
+
+if __name__ == "__main__":
+    import tempfile
+    import logging
+    
+    logging.basicConfig(level=logging.INFO)
+    
+    # Test with a small PGN
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from .data_sources import DataSourceManager
+        
+        # Create test data
+        manager = DataSourceManager(tmpdir)
+        test_pgn = manager.setup_quick_test_data()
+        
+        print(f"\nProcessing test PGN: {test_pgn}")
+        
+        # Extract positions
+        output_path = create_training_data(
+            root_dir=tmpdir,
+            pgn_paths=[test_pgn],
+            stockfish_path="stockfish",  # Assumes stockfish is in PATH
+            max_games_per_file=2
+        )
+        
+        # Load and inspect
+        print(f"\nLoading positions from {output_path}")
+        with open(output_path, 'rb') as f:
+            positions = pickle.load(f)
+        
+        print(f"Loaded {len(positions)} positions")
+        if len(positions) > 0:
+            print("\nFirst position:")
+            print(f"  FEN: {positions[0]['fen']}")
+            print(f"  Move: {positions[0]['move']}")
+            print(f"  Value: {positions[0]['value']:.3f}")
+
