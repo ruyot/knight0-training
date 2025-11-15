@@ -402,8 +402,7 @@ def extract_single_pgn_shard(
         pgn_path: Path to the PGN file
         output_dir: Directory to save the shard
         stockfish_path: Path to Stockfish binary
-        max_games: Optional limit on games to process
-    
+        max_games: Optional limit on games to proc
     Returns:
         Path to the saved shard file
     """

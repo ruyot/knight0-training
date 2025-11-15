@@ -45,13 +45,12 @@ VOLUME_PATH = "/root/knight0"
     timeout=3600,  # 1 hour per PGN
     volumes={VOLUME_PATH: volume},
 )
-def process_single_pgn(pgn_filename: str, max_games: int = None):
+def process_single_pgn(pgn_filename: str):
     """
     Process a single PGN file on one worker.
     
     Args:
         pgn_filename: Name of the PGN file (not full path)
-        max_games: Optional limit on games to process
     
     Returns:
         Tuple of (shard_path, num_positions)
@@ -66,12 +65,12 @@ def process_single_pgn(pgn_filename: str, max_games: int = None):
     pgn_path = Path("/root/knight0_pkg/data") / pgn_filename
     output_dir = Path(VOLUME_PATH) / "processed"
     
-    # Extract positions for this PGN
+    # Extract positions for this PGN (process all games)
     shard_path = extract_single_pgn_shard(
         pgn_path=pgn_path,
         output_dir=output_dir,
         stockfish_path="/usr/games/stockfish",
-        max_games=max_games
+        max_games=None
     )
     
     # Load to get count
@@ -136,10 +135,8 @@ def train_with_parallel_extraction(
         print("(Each PGN gets its own worker + CPU for Stockfish)")
         
         # Process all PGNs in parallel using Modal's .map()
-        # .map() passes each item as separate arguments to the function
-        results = list(process_single_pgn.starmap(
-            [(pgn, None) for pgn in pgn_files]
-        ))
+        # Each PGN file gets its own worker
+        results = list(process_single_pgn.map(pgn_files))
         
         print("\n✓ All workers completed!")
         print("\nResults:")
