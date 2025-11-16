@@ -85,12 +85,12 @@ class ChessNet(nn.Module):
         self.policy_dropout = nn.Dropout(dropout * 1.5)  # Higher dropout in policy head
         self.policy_fc = nn.Linear(32 * 8 * 8, n_moves)
         
-        # Value head with dropout
+        # Value head with MINIMAL dropout (was too aggressive before!)
         self.value_conv = nn.Conv2d(filters, 32, kernel_size=1, bias=False)
         self.value_bn = nn.BatchNorm2d(32)
-        self.value_dropout1 = nn.Dropout(dropout * 1.5)
+        self.value_dropout1 = nn.Dropout(0.05)  # Much lower!
         self.value_fc1 = nn.Linear(32 * 8 * 8, 256)
-        self.value_dropout2 = nn.Dropout(dropout * 1.5)
+        self.value_dropout2 = nn.Dropout(0.05)  # Much lower!
         self.value_fc2 = nn.Linear(256, 1)
     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
