@@ -1,0 +1,24 @@
+[package]
+name = "knight0-search"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chess = "3.2"  # Chess move generation
+onnxruntime = "0.0.14"  # ONNX inference
+ndarray = "0.15"  # Array operations
+anyhow = "1.0"  # Error handling
+clap = { version = "4.4", features = ["derive"] }  # CLI args
+
+[profile.release]
+opt-level = 3
+lto = true  # Link-time optimization
+codegen-units = 1  # Better optimization
+panic = "abort"  # Smaller binary
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
