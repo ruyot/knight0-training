@@ -74,4 +74,10 @@ tmp/
 temp/
 *.tmp
 
-/data
+/data# Large datasets (don't commit)
+kaggle_training_data.pkl
+*.csv
+
+# Kaggle cache
+.kaggle/
+

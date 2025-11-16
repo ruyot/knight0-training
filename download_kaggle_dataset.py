@@ -23,7 +23,7 @@ print("")
 # Download dataset
 print("Downloading from Kaggle (this may take a while - 9.79 GB)...")
 path = kagglehub.dataset_download("joannpeeler/labeled-chess-positions-109m-csv-format")
-print(f"✓ Dataset downloaded to: {path}")
+print(f"Dataset downloaded to: {path}")
 print("")
 
 # Find the CSV file
@@ -31,29 +31,29 @@ dataset_path = Path(path)
 csv_files = list(dataset_path.glob("*.csv"))
 
 if not csv_files:
-    print("❌ No CSV files found!")
+    print("Error: No CSV files found!")
     exit(1)
 
 csv_file = csv_files[0]
-print(f"📄 Found dataset: {csv_file}")
+print(f"Found dataset: {csv_file}")
 print(f"   Size: {csv_file.stat().st_size / (1024**3):.2f} GB")
 print("")
 
 # Process in chunks to save memory
-print("🔄 Processing dataset (converting to training format)...")
+print("Processing dataset (converting to training format)...")
 print("   This will take 10-20 minutes...")
 print("")
 
 chunk_size = 100000  # Process 100K rows at a time
 output_chunks = []
 total_positions = 0
-max_positions = 10_000_000  # Use 10M positions (good balance!)
+max_positions = None 
 
-print(f"Target: {max_positions:,} positions")
+print(f"Target: ALL POSITIONS (~109M)")
 print("")
 
 for chunk_num, chunk in enumerate(pd.read_csv(csv_file, chunksize=chunk_size)):
-    if total_positions >= max_positions:
+    if max_positions and total_positions >= max_positions:
         break
     
     # Extract relevant columns
@@ -106,11 +106,11 @@ for chunk_num, chunk in enumerate(pd.read_csv(csv_file, chunksize=chunk_size)):
         print(f"  Processed {total_positions:,} positions...")
 
 print("")
-print(f"✓ Processed {total_positions:,} positions")
+print(f"Processed {total_positions:,} positions")
 print("")
 
 # Combine all chunks
-print("💾 Saving to pickle format...")
+print("Saving to pickle format...")
 all_positions = []
 for chunk in output_chunks:
     all_positions.extend(chunk)
@@ -119,13 +119,13 @@ output_file = Path("kaggle_training_data.pkl")
 with open(output_file, 'wb') as f:
     pickle.dump(all_positions, f)
 
-print(f"✓ Saved to: {output_file}")
+print(f"Saved to: {output_file}")
 print(f"  Size: {output_file.stat().st_size / (1024**2):.1f} MB")
 print(f"  Positions: {len(all_positions):,}")
 print("")
 
 print("="*80)
-print("✅ KAGGLE DATASET READY FOR TRAINING!")
+print("KAGGLE DATASET READY FOR TRAINING")
 print("="*80)
 print("")
 print("Next steps:")

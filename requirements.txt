@@ -21,3 +21,5 @@ onnxruntime>=1.15.0
 # Misc utilities
 requests>=2.31.0
 
+kagglehub>=0.2.0
+pandas>=2.0.0
